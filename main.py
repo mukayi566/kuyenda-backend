@@ -61,6 +61,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"DEBUG: Incoming {request.method} request to {request.url}")
+    response = await call_next(request)
+    print(f"DEBUG: Response status: {response.status_code}")
+    return response
+
 # Initialize Deepgram (already handled in stt.py, but keeping here if needed for direct access)
 # dg = AsyncDeepgramClient(api_key=DEEPGRAM_API_KEY)
 
