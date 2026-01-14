@@ -1,0 +1,39 @@
+{
+    "type": "Settings",
+    "audio": {
+        "input": {
+            "encoding": "linear16",
+            "sample_rate": 48000
+        },
+        "output": {
+            "encoding": "linear16",
+            "sample_rate": 24000,
+            "container": "none"
+        }
+    },
+    "agent": {
+        "language": "en",
+        "speak": {
+            "provider": {
+                "type": "eleven_labs",
+                "model_id": "eleven_multilingual_v2",
+                "voice_id": "cgSgspJ2msm6clMCkdW9"
+            }
+        },
+        "listen": {
+            "provider": {
+                "type": "deepgram",
+                "version": "v2",
+                "model": "flux-general-en"
+            }
+        },
+        "think": {
+            "provider": {
+                "type": "google",
+                "model": "gemini-2.5-flash"
+            },
+            "prompt": ""
+        },
+        "greeting": "Hello! How may I help you?"
+    }
+}

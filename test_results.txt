@@ -1,0 +1,14 @@
+=== Testing Signup ===
+Status Code: 400
+Response: {
+  "detail": "This email address is already registered. Please try logging in instead."
+}
+
+=== Testing Login with existing user ===
+Status Code: 200
+Response: {
+  "status": "success",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzZTFkOGNjMi0zYTIzLTRjNTUtOGYwNi1kOTQwNTA5MjFkZjMiLCJleHAiOjE3NzA5ODU5OTF9.6U536vhew83WQqPuVsslt0X9HtYyBBkCxX2SM14ad0o",
+  "user_id": "3e1d8cc2-3a23-4c55-8f06-d94050921df3",
+  "message": "Login successful"
+}

@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+httpx
+python-dotenv
+pydantic
+starlette
+slowapi
+joblib
+python-jose
+supabase
+numpy
+pandas
+scikit-learn
+python-multipart
+gunicorn
+requests
