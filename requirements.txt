@@ -14,5 +14,6 @@ scikit-learn
 python-multipart
 gunicorn
 requests
-deepgram-sdk
+deepgram-sdk==3.10.0
+
 
