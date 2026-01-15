@@ -690,18 +690,19 @@ async def get_route(
 ):
     """
     Proxy Mapbox Driving Directions.
-    Format: start=lat,lng & end=lat,lng
+    Format from Frontend: start=lng,lat & end=lng,lat
     'optimize' can be 'duration' (fastest) or 'distance' (shortest).
     """
     # 1. Parse and Validate
-    lat1, lng1 = parse_lat_lng(start)
-    lat2, lng2 = parse_lat_lng(end)
+    # Frontend sends lng,lat (Standard GeoJSON/Mapbox format)
+    lng1, lat1 = parse_lat_lng(start)
+    lng2, lat2 = parse_lat_lng(end)
     
     if not validate_coords(lat1, lng1) or not validate_coords(lat2, lng2):
         raise HTTPException(status_code=400, detail="Coordinates out of bounds")
 
     # 2. Construct Mapbox URL
-    # Mapbox expects: longitude,latitude (Order is flipped vs Google!)
+    # Mapbox expects: longitude,latitude
     coords = f"{lng1},{lat1};{lng2},{lat2}"
     
     # Use mapbox/driving-traffic for real-time congestion data
