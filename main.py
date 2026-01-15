@@ -26,7 +26,6 @@ from intent import detect_intent
 from tts import speak
 from session import SessionManager
 from config import SECRET_KEY, ALGORITHM, DEEPGRAM_API_KEY, CARTESIA_API_KEY, MAPBOX_TOKEN
-from voice_agent import process_thinking_voice
 from database import (
     create_profile, get_profile, create_trip, update_trip_status, 
     get_trip_history, save_route, record_payment, submit_review, log_analytics_event,
@@ -229,6 +228,50 @@ def read_root():
 async def voice_ws(ws: WebSocket, token: Optional[str] = Query(None)):
     print(f"DEBUG: WebSocket connection attempt with token: {token[:10] if token else 'None'}...")
     try:
+        user = get_current_user(conn=ws, token=token)
+        print(f"DEBUG: WebSocket Auth successful for user: {user}")
+    except HTTPException as e:
+        print(f"DEBUG: WebSocket Auth failed: {e.detail}")
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await ws.accept()
+    print("DEBUG: WebSocket connection accepted")
+    session = SessionManager()
+
+    try:
+        # ✅ Lazy import here so server can boot even if Deepgram SDK changes
+        from voice_agent import process_thinking_voice
+
+        while True:
+            audio_bytes = await ws.receive_bytes()
+            print(f"Received {len(audio_bytes)} bytes of audio")
+
+            audio_response, transcription, agent_text = await process_thinking_voice(
+                audio_bytes,
+                DEEPGRAM_API_KEY
+            )
+
+            if audio_response:
+                await ws.send_bytes(audio_response)
+                log_voice_command(user, transcription, agent_text, "thinking_agent")
+            else:
+                await ws.send_text("EMPTY")
+                log_voice_command(user, transcription, "IGNORE_ME", "intent_filter")
+
+    except ModuleNotFoundError as e:
+        # If deepgram agent types missing, don't crash entire service
+        print(f"Voice dependency missing: {e}")
+        await ws.send_text("VOICE_SERVICE_UNAVAILABLE")
+        await ws.close()
+    except WebSocketDisconnect:
+        print("Voice WebSocket disconnected")
+    except Exception as e:
+        print(f"WebSocket Error: {e}")
+        await ws.close()
+
+    print(f"DEBUG: WebSocket connection attempt with token: {token[:10] if token else 'None'}...")
+    try:
         # get_current_user will automatically take 'ws' as its 'conn' because WebSocket inherits from HTTPConnection
         user = get_current_user(conn=ws, token=token)
         print(f"DEBUG: WebSocket Auth successful for user: {user}")
@@ -390,10 +433,6 @@ def verify_otp(phone: str, otp: str):
          return {"status": "success", "token": access_token}
     raise HTTPException(status_code=400, detail="Invalid OTP")
 
-# --- Profiling & History Endpoints ---
-
-@app.get("/profiles/me")
-def get_my_profile(user_id: str = Depends(get_current_user)):
     try:
         profile = get_profile(user_id)
         return profile.data
