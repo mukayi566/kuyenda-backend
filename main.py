@@ -573,9 +573,9 @@ async def report_traffic_endpoint(report: IncidentReport, user_id: str = Depends
 
 @app.get("/traffic/incidents")
 async def get_incidents():
-    # Return incidents from the last 2 hours
+    # Return incidents from the last 24 hours
     now = datetime.now()
-    filtered = [i for i in active_incidents if (now - datetime.fromisoformat(i["created_at"])).total_seconds() < 7200]
+    filtered = [i for i in active_incidents if (now - datetime.fromisoformat(i["created_at"])).total_seconds() < 86400]
     return {"incidents": filtered}
 
 @app.post("/user/avatar")
