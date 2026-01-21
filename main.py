@@ -731,6 +731,142 @@ async def get_route(
     return data
 
     
+# --- Search Configuration ---
+
+# Move known_stops to module level (outside function)
+KNOWN_STOPS = [
+    # Educational Institutions
+    {"name": "Eden University", "address": "Barlstone Park, Lusaka", "latitude": -15.3636, "longitude": 28.2334, "category": "Education"},
+    {"name": "University of Zambia", "address": "Great East Road, Lusaka", "latitude": -15.3875, "longitude": 28.3228, "category": "Education"},
+    
+    # Parks & Recreation
+    {"name": "Barlstone Park", "address": "Lusaka West", "latitude": -15.3680, "longitude": 28.2300, "category": "Park"},
+    
+    # Shopping Malls
+    {"name": "Manda Hill Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3975, "longitude": 28.3070, "category": "Shopping"},
+    {"name": "Arcades Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3956, "longitude": 28.3388, "category": "Shopping"},
+    {"name": "East Park Mall", "address": "Great East Road, Lusaka", "latitude": -15.3950, "longitude": 28.3400, "category": "Shopping"},
+    
+    # Markets
+    {"name": "Kamwala Market", "address": "Kamwala, Lusaka", "latitude": -15.4300, "longitude": 28.2930, "category": "Market"},
+    
+    # Hospitals & Healthcare
+    {"name": "Levy Mwanawasa University Teaching Hospital", "address": "Great East Road, Lusaka", "latitude": -15.3965, "longitude": 28.3490, "category": "Hospital"},
+    
+    # City Center
+    {"name": "Town Center", "address": "Cairo Road, Lusaka", "latitude": -15.4180, "longitude": 28.2820, "category": "City Center"},
+    
+    # Airport
+    {"name": "Kenneth Kaunda International Airport", "address": "Great East Road, Chongwe District", "latitude": -15.3308, "longitude": 28.4535, "category": "Airport"},
+    
+    # Museums
+    {"name": "Zambia National Museum", "address": "Independence Avenue, Lusaka", "latitude": -15.4200, "longitude": 28.2850, "category": "Museum"},
+    
+    # RESTAURANTS - INDIAN CUISINE
+    {"name": "Dil Restaurant", "address": "Ibex Hill, Lusaka", "latitude": -15.3800, "longitude": 28.3100, "category": "Restaurant - Indian"},
+    {"name": "Royal Dil", "address": "Acacia Office Park, Lusaka", "latitude": -15.3960, "longitude": 28.3380, "category": "Restaurant - Indian"},
+    
+    # RESTAURANTS - CHINESE CUISINE
+    {"name": "Sichuan Restaurant", "address": "Show Grounds, Lusaka", "latitude": -15.4100, "longitude": 28.2900, "category": "Restaurant - Chinese"},
+    
+    # RESTAURANTS - ITALIAN CUISINE
+    {"name": "Casa Portico", "address": "Lusaka", "latitude": -15.4000, "longitude": 28.3000, "category": "Restaurant - Italian"},
+    {"name": "Eataly Restaurant & Pizzeria", "address": "Lusaka", "latitude": -15.4050, "longitude": 28.2950, "category": "Restaurant - Italian"},
+    
+    # RESTAURANTS - STEAKHOUSES
+    {"name": "Marlin Restaurant", "address": "Longacres, Lusaka", "latitude": -15.4150, "longitude": 28.2900, "category": "Restaurant - Steakhouse"},
+    {"name": "Marlin EastPark Mall", "address": "EastPark Mall, Lusaka", "latitude": -15.3950, "longitude": 28.3400, "category": "Restaurant - Steakhouse"},
+    {"name": "Flame Restaurant", "address": "Lusaka", "latitude": -15.3900, "longitude": 28.3200, "category": "Restaurant - Steakhouse"},
+    {"name": "Copper Creek Spur", "address": "Manda Hill Shopping Centre, Lusaka", "latitude": -15.3975, "longitude": 28.3070, "category": "Restaurant - Steakhouse"},
+    
+    # RESTAURANTS - CAFES & CASUAL DINING
+    {"name": "Mint Lounge", "address": "Acacia Office Park, near Arcades, Lusaka", "latitude": -15.3960, "longitude": 28.3380, "category": "Restaurant - Cafe"},
+    {"name": "The Deli", "address": "Rhodes Park, Lusaka", "latitude": -15.4000, "longitude": 28.3050, "category": "Restaurant - Cafe"},
+    {"name": "Sugarbush Cafe", "address": "Sugarbush Farm, outside Lusaka", "latitude": -15.3500, "longitude": 28.2500, "category": "Restaurant - Cafe"},
+    {"name": "The Corner Cafe", "address": "Lusaka", "latitude": -15.4100, "longitude": 28.2900, "category": "Restaurant - Cafe"},
+    {"name": "Zambean Coffee Co", "address": "Leopards Hill Business Park, Lusaka", "latitude": -15.3700, "longitude": 28.3700, "category": "Restaurant - Cafe"},
+    
+    # RESTAURANTS - FINE DINING
+    {"name": "Botanica", "address": "Lusaka", "latitude": -15.3850, "longitude": 28.3150, "category": "Restaurant - Fine Dining"},
+    {"name": "Jessyz Fine Dining", "address": "KK Mall, Alick Nkhata Road, Longacres", "latitude": -15.4150, "longitude": 28.2900, "category": "Restaurant - Fine Dining"},
+    {"name": "Latitude 15 Degrees", "address": "Lusaka", "latitude": -15.4000, "longitude": 28.3100, "category": "Restaurant - Hotel"},
+    
+    # RESTAURANTS - ETHIOPIAN CUISINE
+    {"name": "Green Ethiopian Restaurant", "address": "Lusaka", "latitude": -15.4050, "longitude": 28.2950, "category": "Restaurant - Ethiopian"},
+    
+    # RESTAURANTS - GREEK CUISINE
+    {"name": "Eviva Greek Restaurant", "address": "Rhodes Park, Lusaka", "latitude": -15.4000, "longitude": 28.3050, "category": "Restaurant - Greek"},
+    
+    # RESTAURANTS - PORTUGUESE CUISINE
+    {"name": "Adega Restaurant", "address": "Levy Junction, Lusaka", "latitude": -15.3965, "longitude": 28.3490, "category": "Restaurant - Portuguese"},
+    {"name": "Mozambik Lusaka", "address": "Pinnacle Mall, Lusaka", "latitude": -15.4000, "longitude": 28.3000, "category": "Restaurant - Mozambican"},
+    
+    # RESTAURANTS - THAI CUISINE
+    {"name": "Thai Restaurant", "address": "Lusaka", "latitude": -15.3950, "longitude": 28.3200, "category": "Restaurant - Thai"},
+    
+    # RESTAURANTS - KOREAN CUISINE
+    {"name": "Arirang Restaurant", "address": "Lusaka", "latitude": -15.4000, "longitude": 28.3100, "category": "Restaurant - Korean"},
+    
+    # RESTAURANTS - MOROCCAN CUISINE
+    {"name": "Dar Lalla", "address": "Lusaka", "latitude": -15.3900, "longitude": 28.3000, "category": "Restaurant - Moroccan"},
+    
+    # RESTAURANTS - TURKISH CUISINE
+    {"name": "Istanbul Cafe & Restaurant", "address": "Lusaka", "latitude": -15.4050, "longitude": 28.2950, "category": "Restaurant - Turkish"},
+    
+    # RESTAURANTS - INTERNATIONAL/FUSION
+    {"name": "The Fat Chef", "address": "East Park Mall, Lusaka", "latitude": -15.3950, "longitude": 28.3400, "category": "Restaurant - Fusion"},
+    {"name": "Four Seasons Bistro", "address": "Suez Road, Ridgeway", "latitude": -15.4200, "longitude": 28.3100, "category": "Restaurant - International"},
+    {"name": "The Retreat", "address": "Outskirts of Lusaka", "latitude": -15.3600, "longitude": 28.2800, "category": "Restaurant - International"},
+    {"name": "Misty Restaurant and Jazz Cafe", "address": "Lusaka", "latitude": -15.4100, "longitude": 28.2900, "category": "Restaurant - Continental"},
+    {"name": "Bojangles Lusaka", "address": "Lusaka", "latitude": -15.4000, "longitude": 28.3000, "category": "Restaurant - International"},
+    {"name": "Prime Joint", "address": "EastPark Mall, Lusaka", "latitude": -15.3950, "longitude": 28.3400, "category": "Restaurant - International"},
+    
+    # RESTAURANTS - PIZZA & CASUAL
+    {"name": "Scallywags Cafe and Restaurant", "address": "Lusaka", "latitude": -15.3950, "longitude": 28.3100, "category": "Restaurant - Pizza"},
+    {"name": "Debonairs Pizza", "address": "Multiple locations, Lusaka", "latitude": -15.4000, "longitude": 28.3000, "category": "Restaurant - Pizza"},
+    
+    # RESTAURANTS - TRADITIONAL ZAMBIAN
+    {"name": "Twapandula", "address": "Lusaka", "latitude": -15.4050, "longitude": 28.2950, "category": "Restaurant - Zambian"},
+    {"name": "Down To Earth Restaurant & Bar", "address": "Lusaka", "latitude": -15.3950, "longitude": 28.3050, "category": "Restaurant - Zambian"},
+    {"name": "Taste Restaurant", "address": "Lusaka", "latitude": -15.4000, "longitude": 28.3000, "category": "Restaurant - Zambian"},
+    
+    # RESTAURANTS - SEAFOOD
+    {"name": "John Dory's Lusaka", "address": "Lusaka", "latitude": -15.3950, "longitude": 28.3100, "category": "Restaurant - Seafood"},
+    
+    # BARS & LOUNGES
+    {"name": "Rhapsody's Cafe & Wine Bar", "address": "Lusaka", "latitude": -15.4000, "longitude": 28.3050, "category": "Bar & Lounge"},
+    {"name": "Fox & Hound", "address": "Lusaka", "latitude": -15.4050, "longitude": 28.2950, "category": "Bar & Restaurant"},
+    {"name": "Fresco Bar & Cafe", "address": "Lusaka", "latitude": -15.3950, "longitude": 28.3000, "category": "Bar & Cafe"},
+    {"name": "The Orange Tree Public House", "address": "Lusaka", "latitude": -15.4000, "longitude": 28.3100, "category": "Pub"},
+    
+    # HOTELS WITH RESTAURANTS
+    {"name": "Intercontinental Hotel Lusaka", "address": "Lusaka", "latitude": -15.4150, "longitude": 28.2850, "category": "Hotel"},
+    {"name": "Radisson Blu Hotel", "address": "Lusaka", "latitude": -15.3900, "longitude": 28.3100, "category": "Hotel"},
+    {"name": "Taj Pamodzi Hotel", "address": "Lusaka", "latitude": -15.4100, "longitude": 28.2900, "category": "Hotel"},
+    {"name": "Southern Sun Ridgeway", "address": "Ridgeway, Lusaka", "latitude": -15.4200, "longitude": 28.3100, "category": "Hotel"},
+    
+    # ADDITIONAL ATTRACTIONS
+    {"name": "Chaminuka Nature Reserve", "address": "40 minutes from Lusaka", "latitude": -15.2500, "longitude": 28.4000, "category": "Nature Reserve"},
+    {"name": "Kalimba Reptile Park", "address": "Lusaka", "latitude": -15.3800, "longitude": 28.3200, "category": "Attraction"},
+]
+
+# Lusaka bounding box - consider expanding slightly if too restrictive
+LUSAKA_BBOX = [28.10, -15.60, 29.10, -15.20]  # [west, south, east, north]
+
+
+def in_lusaka_bbox(lng_val: float, lat_val: float) -> bool:
+    """Check if coordinates are within Lusaka bounding box"""
+    w, s, e, n = LUSAKA_BBOX
+    return (w <= lng_val <= e) and (s <= lat_val <= n)
+
+
+def normalize_text(text: str) -> str:
+    """Normalize text for comparison"""
+    if not text:
+        return ""
+    return text.lower().strip()
+
+
 @app.get("/geocode/search")
 @limiter.limit("30/minute")
 async def geocode_search(
@@ -745,122 +881,170 @@ async def geocode_search(
     - Uses proximity (lat/lng) to bias results near the user
     - Returns only results with valid coordinates
     """
-
-    # --- Lusaka bounding box (west,south,east,north) ---
-    # Adjust if needed but these work well for a strict Lusaka filter
-    LUSAKA_BBOX = [28.10, -15.60, 29.10, -15.20]
+    
     bbox_str = ",".join(str(x) for x in LUSAKA_BBOX)
-
-    # Lusaka fallback center
-    default_proximity = (28.3228, -15.3875)  # (lng,lat)
-
+    
+    # Lusaka fallback center (UNZA coordinates)
+    default_proximity = (28.3228, -15.3875)  # (lng, lat)
+    
     # If frontend provides location, use it (better ranking)
     if lat is not None and lng is not None:
         proximity = (lng, lat)
     else:
         proximity = default_proximity
-
+    
     proximity_str = f"{proximity[0]},{proximity[1]}"
-
-    def in_lusaka_bbox(lng_val: float, lat_val: float) -> bool:
-        w, s, e, n = LUSAKA_BBOX
-        return (w <= lng_val <= e) and (s <= lat_val <= n)
-
-    # 1) Local known stops (fast + guaranteed Lusaka)
-    known_stops = [
-        {"name": "Eden University", "address": "Barlstone Park, Lusaka", "latitude": -15.3636, "longitude": 28.2334},
-        {"name": "Barlstone Park", "address": "Lusaka West", "latitude": -15.3680, "longitude": 28.2300},
-        {"name": "Kamwala Market", "address": "Kamwala, Lusaka", "latitude": -15.4300, "longitude": 28.2930},
-        {"name": "Levy Mwanawasa University Teaching Hospital", "address": "Great East Road, Lusaka", "latitude": -15.3965, "longitude": 28.3490},
-        {"name": "Town Center", "address": "Cairo Road, Lusaka", "latitude": -15.4180, "longitude": 28.2820},
-        {"name": "Manda Hill Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3977, "longitude": 28.3366},
-        {"name": "Arcades Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3956, "longitude": 28.3388},
-    ]
-
-    q = query.strip().lower()
+    
+    # Normalize query for matching
+    q_normalized = normalize_text(query)
     results = []
-
-    for stop in known_stops:
-        if q in stop["name"].lower() or q in stop["address"].lower():
-            results.append({
-                "name": stop["name"],
-                "address": stop["address"],
-                "latitude": stop["latitude"],
-                "longitude": stop["longitude"],
-                "source": "kuyenda_local",
-            })
-
-    # 2) Mapbox Geocoding (restricted to Lusaka via bbox)
+    
+    # 1) Search local known stops (fast + guaranteed Lusaka)
+    for stop in KNOWN_STOPS:
+        name_normalized = normalize_text(stop["name"])
+        address_normalized = normalize_text(stop["address"])
+        
+        # Check if query matches name or address
+        if q_normalized in name_normalized or q_normalized in address_normalized:
+            # Validate coordinates are within Lusaka bbox
+            if in_lusaka_bbox(stop["longitude"], stop["latitude"]):
+                results.append({
+                    "name": stop["name"],
+                    "address": stop["address"],
+                    "latitude": stop["latitude"],
+                    "longitude": stop["longitude"],
+                    "category": stop.get("category", "Unknown"),
+                    "source": "kuyenda_local",
+                })
+            else:
+                # Log stops that are outside bbox for debugging
+                print(f"⚠️  Local stop outside bbox: {stop['name']} at ({stop['longitude']}, {stop['latitude']})")
+    
+    # 2) Mapbox Geocoding API (restricted to Lusaka via bbox)
     from urllib.parse import quote
     encoded_query = quote(query.strip())
-    v5_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded_query}.json"
-
+    v5_url = f"https://api.mapbox.com/search/geocode/v6/forward"
+    
+    # Use v6 API with stricter bbox enforcement
     params = {
+        "q": query.strip(),
         "access_token": MAPBOX_TOKEN,
         "country": "ZM",
-        "bbox": bbox_str,                 # ✅ HARD filter to Lusaka
-        "proximity": proximity_str,       # ✅ bias to user inside Lusaka
-        "types": "poi,address,place,locality,neighborhood",
+        "bbox": bbox_str,                 # Bounding box filter
+        "proximity": proximity_str,       # Bias to user location
+        "types": "poi,address,place,street,neighborhood",
         "limit": 15,
-        "autocomplete": "true",
-        "fuzzyMatch": "true",
         "language": "en",
     }
-
+    
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # Try v6 first, fallback to v5 if needed
             resp = await client.get(v5_url, params=params)
+            
+            # If v6 fails, fallback to v5
+            if resp.status_code != 200:
+                v5_url_fallback = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded_query}.json"
+                v5_params = {
+                    "access_token": MAPBOX_TOKEN,
+                    "country": "ZM",
+                    "bbox": bbox_str,
+                    "proximity": proximity_str,
+                    "types": "poi,address,place,locality,neighborhood",
+                    "limit": 15,
+                    "autocomplete": "true",
+                    "fuzzyMatch": "true",
+                    "language": "en",
+                }
+                resp = await client.get(v5_url_fallback, params=v5_params)
+                
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Mapbox geocoding timed out")
-
-    if resp.status_code == 200:
+        print(f"⚠️  Mapbox geocoding timed out for query: {query}")
+        # Don't fail the entire request, just skip Mapbox results
+        resp = None
+    except Exception as e:
+        print(f"⚠️  Mapbox geocoding error: {str(e)}")
+        resp = None
+    
+    # Process Mapbox results
+    if resp and resp.status_code == 200:
         data = resp.json()
-
-        for feat in data.get("features", []):
-            center = feat.get("center") or []
-            if len(center) != 2:
+        features = data.get("features", [])
+        
+        for feat in features:
+            # Handle both v5 and v6 response formats
+            geometry = feat.get("geometry", {})
+            coordinates = geometry.get("coordinates", [])
+            
+            # v5 uses "center", v6 uses "geometry.coordinates"
+            if not coordinates:
+                center = feat.get("center", [])
+                coordinates = center
+            
+            if len(coordinates) != 2:
                 continue
-
-            feat_lng, feat_lat = float(center[0]), float(center[1])
-
-            # Extra safety: keep only Lusaka bbox results
+            
+            feat_lng, feat_lat = float(coordinates[0]), float(coordinates[1])
+            
+            # STRICT: Only include results within Lusaka bbox
             if not in_lusaka_bbox(feat_lng, feat_lat):
+                print(f"⚠️  Mapbox result outside bbox: {feat.get('text')} at ({feat_lng}, {feat_lat})")
                 continue
-
+            
+            # Get properties
+            properties = feat.get("properties", {})
+            name = feat.get("text") or feat.get("place_name", "Unknown")
+            address = feat.get("place_name") or feat.get("properties", {}).get("full_address", name)
+            
             results.append({
-                "name": feat.get("text"),
-                "address": feat.get("place_name"),
+                "name": name,
+                "address": address,
                 "latitude": feat_lat,
                 "longitude": feat_lng,
                 "source": "mapbox",
             })
-    else:
-        # Don't crash user search; just log
-        print("Mapbox geocode error:", resp.status_code, resp.text)
-
-    # 3) Dedupe (avoid duplicates between local & mapbox)
+    elif resp:
+        # Log error but don't crash
+        print(f"❌ Mapbox geocode error: {resp.status_code} - {resp.text[:200]}")
+    
+    # 3) Deduplicate results
     seen = set()
     deduped = []
-
-    def norm(s: str) -> str:
-        return (s or "").lower().strip()
-
+    
     for r in results:
-        key = (norm(r.get("name")), round(float(r["longitude"]), 5), round(float(r["latitude"]), 5))
+        # Create unique key based on name and rounded coordinates
+        name_key = normalize_text(r.get("name", ""))
+        lng_rounded = round(float(r["longitude"]), 4)  # ~11m precision
+        lat_rounded = round(float(r["latitude"]), 4)
+        
+        key = (name_key, lng_rounded, lat_rounded)
+        
         if key in seen:
             continue
+        
         seen.add(key)
         deduped.append(r)
-
-    # 4) Final safety filter: must have coords
-    valid_results = [
-        r for r in deduped
-        if r.get("latitude") is not None and r.get("longitude") is not None
-    ]
-
-    # Local first, then Mapbox
-    valid_results.sort(key=lambda x: 0 if x.get("source") == "kuyenda_local" else 1)
-
+    
+    # 4) Final validation: ensure all results have valid coordinates
+    valid_results = []
+    for r in deduped:
+        lat_val = r.get("latitude")
+        lng_val = r.get("longitude")
+        
+        if lat_val is not None and lng_val is not None:
+            # Double-check bbox (paranoid validation)
+            if in_lusaka_bbox(lng_val, lat_val):
+                valid_results.append(r)
+            else:
+                print(f"⚠️  Final filter caught: {r.get('name')} outside bbox")
+    
+    # 5) Sort: Local results first, then Mapbox
+    valid_results.sort(key=lambda x: (
+        0 if x.get("source") == "kuyenda_local" else 1,
+        x.get("name", "").lower()  # Secondary sort by name
+    ))
+    
+    # Limit to top 15 results
     return {"results": valid_results[:15]}
 
 
