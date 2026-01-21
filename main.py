@@ -730,59 +730,139 @@ async def get_route(
             
     return data
 
+    
 @app.get("/geocode/search")
 @limiter.limit("30/minute")
-async def geocode_search(request: Request, query: str = Query(..., min_length=2)):
+async def geocode_search(
+    request: Request,
+    query: str = Query(..., min_length=2),
+    lat: float | None = None,
+    lng: float | None = None
+):
     """
-    Optimized Search for Lusaka Drivers.
-    Prioritizes Landmarks/POIs and ensures every result has valid GPS coordinates.
+    Lusaka-only search (Local + Mapbox).
+    - Uses bbox to restrict results to Lusaka
+    - Uses proximity (lat/lng) to bias results near the user
+    - Returns only results with valid coordinates
     """
-    # 1. Known Driver Stops (Seeded local knowledge for perfect accuracy)
+
+    # --- Lusaka bounding box (west,south,east,north) ---
+    # Adjust if needed but these work well for a strict Lusaka filter
+    LUSAKA_BBOX = [28.10, -15.60, 29.10, -15.20]
+    bbox_str = ",".join(str(x) for x in LUSAKA_BBOX)
+
+    # Lusaka fallback center
+    default_proximity = (28.3228, -15.3875)  # (lng,lat)
+
+    # If frontend provides location, use it (better ranking)
+    if lat is not None and lng is not None:
+        proximity = (lng, lat)
+    else:
+        proximity = default_proximity
+
+    proximity_str = f"{proximity[0]},{proximity[1]}"
+
+    def in_lusaka_bbox(lng_val: float, lat_val: float) -> bool:
+        w, s, e, n = LUSAKA_BBOX
+        return (w <= lng_val <= e) and (s <= lat_val <= n)
+
+    # 1) Local known stops (fast + guaranteed Lusaka)
     known_stops = [
         {"name": "Eden University", "address": "Barlstone Park, Lusaka", "latitude": -15.3636, "longitude": 28.2334},
         {"name": "Barlstone Park", "address": "Lusaka West", "latitude": -15.3680, "longitude": 28.2300},
         {"name": "Kamwala Market", "address": "Kamwala, Lusaka", "latitude": -15.4300, "longitude": 28.2930},
         {"name": "Levy Mwanawasa University Teaching Hospital", "address": "Great East Road, Lusaka", "latitude": -15.3965, "longitude": 28.3490},
         {"name": "Town Center", "address": "Cairo Road, Lusaka", "latitude": -15.4180, "longitude": 28.2820},
+        {"name": "Manda Hill Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3977, "longitude": 28.3366},
+        {"name": "Arcades Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3956, "longitude": 28.3388},
     ]
 
+    q = query.strip().lower()
     results = []
-    # Add local matches first
+
     for stop in known_stops:
-        if query.lower() in stop["name"].lower() or query.lower() in stop["address"].lower():
-            results.append({**stop, "source": "kuyenda_local"})
-
-    # 2. Mapbox v5 Geocoding (Better for instant coordinates than Searchbox)
-    from urllib.parse import quote
-    encoded_query = quote(query)
-    v5_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded_query}.json"
-    params = {
-        "access_token": MAPBOX_TOKEN,
-        "proximity": "28.3228,-15.3875", # Lusaka Bias
-        "country": "ZM",
-        "types": "poi,place,neighborhood,locality,street",
-        "limit": 10,
-        "fuzzyMatch": "true"
-    }
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(v5_url, params=params)
-    
-    if resp.status_code == 200:
-        data = resp.json()
-        for feat in data.get("features", []):
+        if q in stop["name"].lower() or q in stop["address"].lower():
             results.append({
-                "name": feat.get("text"), # Landmark Name
-                "address": feat.get("place_name"), # Full Address
-                "latitude": feat.get("center")[1],
-                "longitude": feat.get("center")[0],
-                "source": "mapbox"
+                "name": stop["name"],
+                "address": stop["address"],
+                "latitude": stop["latitude"],
+                "longitude": stop["longitude"],
+                "source": "kuyenda_local",
             })
 
-    # 3. Final Safety Filter: Ensure NO results without coordinates reach the frontend
-    valid_results = [r for r in results if r.get("latitude") and r.get("longitude")]
-    
+    # 2) Mapbox Geocoding (restricted to Lusaka via bbox)
+    from urllib.parse import quote
+    encoded_query = quote(query.strip())
+    v5_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded_query}.json"
+
+    params = {
+        "access_token": MAPBOX_TOKEN,
+        "country": "ZM",
+        "bbox": bbox_str,                 # ✅ HARD filter to Lusaka
+        "proximity": proximity_str,       # ✅ bias to user inside Lusaka
+        "types": "poi,address,place,locality,neighborhood",
+        "limit": 15,
+        "autocomplete": "true",
+        "fuzzyMatch": "true",
+        "language": "en",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(v5_url, params=params)
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Mapbox geocoding timed out")
+
+    if resp.status_code == 200:
+        data = resp.json()
+
+        for feat in data.get("features", []):
+            center = feat.get("center") or []
+            if len(center) != 2:
+                continue
+
+            feat_lng, feat_lat = float(center[0]), float(center[1])
+
+            # Extra safety: keep only Lusaka bbox results
+            if not in_lusaka_bbox(feat_lng, feat_lat):
+                continue
+
+            results.append({
+                "name": feat.get("text"),
+                "address": feat.get("place_name"),
+                "latitude": feat_lat,
+                "longitude": feat_lng,
+                "source": "mapbox",
+            })
+    else:
+        # Don't crash user search; just log
+        print("Mapbox geocode error:", resp.status_code, resp.text)
+
+    # 3) Dedupe (avoid duplicates between local & mapbox)
+    seen = set()
+    deduped = []
+
+    def norm(s: str) -> str:
+        return (s or "").lower().strip()
+
+    for r in results:
+        key = (norm(r.get("name")), round(float(r["longitude"]), 5), round(float(r["latitude"]), 5))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+
+    # 4) Final safety filter: must have coords
+    valid_results = [
+        r for r in deduped
+        if r.get("latitude") is not None and r.get("longitude") is not None
+    ]
+
+    # Local first, then Mapbox
+    valid_results.sort(key=lambda x: 0 if x.get("source") == "kuyenda_local" else 1)
+
     return {"results": valid_results[:15]}
+
 
 @app.get("/geocode/reverse")
 @limiter.limit("30/minute")
