@@ -151,13 +151,35 @@ def create_access_token(data: dict) -> str:
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user(request_or_ws, token: Optional[str] = Query(None)):
+def get_current_user(request: Request, token: Optional[str] = Query(None)):
     """
-    Validate JWT.
+    Validate JWT for HTTP requests.
     Accepts token from Authorization header OR query param token=...
-    Works for HTTP requests and WebSockets.
     """
-    auth_header = request_or_ws.headers.get("Authorization") if hasattr(request_or_ws, "headers") else None
+    auth_header = request.headers.get("Authorization") if hasattr(request, "headers") else None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing authentication")
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if not user_id:
+            raise JWTError
+        return user_id
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def get_ws_user(ws: WebSocket, token: Optional[str] = None):
+    """
+    Validate JWT for WebSocket connections.
+    Accepts token from query param.
+    """
+    # Try to get token from headers if available
+    auth_header = ws.headers.get("Authorization") if hasattr(ws, "headers") else None
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
 
@@ -250,7 +272,7 @@ def read_root():
 async def voice_ws(ws: WebSocket, token: Optional[str] = Query(None)):
     print(f"DEBUG: WebSocket connection attempt token: {token[:10] if token else 'None'}...")
     try:
-        user_id = get_current_user(ws, token=token)
+        user_id = get_ws_user(ws, token=token)
         print(f"DEBUG: WebSocket Auth OK user: {user_id}")
     except HTTPException as e:
         print(f"DEBUG: WebSocket Auth failed: {e.detail}")
