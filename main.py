@@ -10,7 +10,7 @@ import os
 import uuid
 import shutil
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Dict
 
 import httpx
 import joblib
