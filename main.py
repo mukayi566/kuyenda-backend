@@ -539,45 +539,166 @@ def log_event(event: AnalyticsEvent, user_id: str = Depends(get_current_user)):
 # ----------------------------
 # Traffic: incidents
 # ----------------------------
+# ----------------------------
+# Traffic: Clustering & Notifications
+# ----------------------------
+import math
+
+class IncidentCluster(BaseModel):
+    id: str
+    type: str
+    latitude: float
+    longitude: float
+    description: Optional[str] = None
+    status: str = "PENDING"  # PENDING, ACTIVE, CONFIRMED
+    reporters: List[str] = []
+    created_at: str
+    updated_at: str
+    expires_at: str
+
+# In-memory stores
+active_clusters: Dict[str, dict] = {}  # cluster_id -> cluster_data
+user_interactions: Dict[str, dict] = {} # user_id -> { 'seen': [ids], 'dismissed': [ids] }
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    R = 6371000  # meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
 @app.post("/traffic/report")
 async def report_traffic_endpoint(report: IncidentReport, user_id: str = Depends(get_current_user)):
     try:
-        incident = {
-            "id": f"incident_{len(active_incidents) + 1}",
-            "user_id": user_id,
-            "type": report.type,
-            "latitude": report.latitude,
-            "longitude": report.longitude,
-            "description": report.description,
-            "created_at": datetime.now().isoformat(),
-        }
-        active_incidents.append(incident)
-
-        # Persist (non-fatal if fails)
-        try:
-            report_incident(
-                user_id=user_id,
-                incident_type=report.type,
-                lat=report.latitude,
-                lng=report.longitude,
-                description=report.description,
-            )
-        except Exception as db_err:
-            print(f"⚠️ Incident DB insert failed: {db_err}")
-
-        return {"status": "success", "incident": incident}
+        now = datetime.now()
+        
+        # 1. Clustering: fast search for nearby existing cluster (within 25m)
+        match_id = None
+        for cid, cluster in active_clusters.items():
+            if cluster["type"] == report.type:
+                dist = haversine_distance(report.latitude, report.longitude, cluster["latitude"], cluster["longitude"])
+                if dist <= 25:
+                    match_id = cid
+                    break
+        
+        if match_id:
+            # 2. Update existing cluster
+            cluster = active_clusters[match_id]
+            if user_id not in cluster["reporters"]:
+                cluster["reporters"].append(user_id)
+                cluster["updated_at"] = now.isoformat()
+                cluster["expires_at"] = (now + timedelta(minutes=30)).isoformat() # Refresh TTL
+                
+                # Status Logic
+                count = len(cluster["reporters"])
+                if count >= 3:
+                    cluster["status"] = "CONFIRMED"
+                elif count >= 2:
+                    cluster["status"] = "ACTIVE"
+                    
+            return {"status": "success", "action": "merged", "cluster": cluster}
+            
+        else:
+            # 3. Create new cluster
+            new_id = f"clus_{uuid.uuid4().hex[:8]}"
+            cluster = {
+                "id": new_id,
+                "type": report.type,
+                "latitude": report.latitude,
+                "longitude": report.longitude,
+                "description": report.description,
+                "status": "PENDING",
+                "reporters": [user_id],
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+                "expires_at": (now + timedelta(minutes=30)).isoformat()
+            }
+            active_clusters[new_id] = cluster
+            
+            # Async persist to DB (fire & forget)
+            try:
+                report_incident(user_id, report.type, report.latitude, report.longitude, report.description)
+            except:
+                pass
+                
+            return {"status": "success", "action": "created", "cluster": cluster}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/notifications/user")
+async def get_user_notifications(
+    lat: float, 
+    lng: float, 
+    radius: int = 2000, 
+    user_id: str = Depends(get_current_user)
+):
+    now = datetime.now()
+    notifications = []
+    
+    # Init user state if needed
+    if user_id not in user_interactions:
+        user_interactions[user_id] = {"seen": set(), "dismissed": set()}
+    
+    user_state = user_interactions[user_id]
+    
+    # Cleanup expired clusters
+    expired_ids = [cid for cid, c in active_clusters.items() if now > datetime.fromisoformat(c["expires_at"])]
+    for cid in expired_ids:
+        del active_clusters[cid]
+
+    # Filter loop
+    for cid, cluster in active_clusters.items():
+        # Exclude own reports
+        if user_id in cluster["reporters"]:
+            continue
+            
+        # Exclude dismissed
+        if cid in user_state["dismissed"]:
+            continue
+            
+        # Check Distance (Geospatial)
+        dist = haversine_distance(lat, lng, cluster["latitude"], cluster["longitude"])
+        if dist <= radius:
+            # Check Status (Only notify for meaningful incidents)
+            if cluster["status"] in ["ACTIVE", "CONFIRMED", "PENDING"]: # Allow PENDING for demo speed
+                notifications.append({
+                    **cluster,
+                    "distance_meters": round(dist),
+                    "is_new": cid not in user_state["seen"]
+                })
+                
+    return {"notifications": notifications, "count": len(notifications)}
+
+@app.post("/notifications/mark-seen")
+async def mark_seen(payload: dict = Body(...), user_id: str = Depends(get_current_user)):
+    cluster_id = payload.get("id")
+    if user_id not in user_interactions:
+        user_interactions[user_id] = {"seen": set(), "dismissed": set()}
+    
+    if cluster_id:
+        user_interactions[user_id]["seen"].add(cluster_id)
+    return {"status": "marked"}
+
+@app.delete("/notifications/{cluster_id}/dismiss")
+async def dismiss_notification(cluster_id: str, user_id: str = Depends(get_current_user)):
+    if user_id not in user_interactions:
+        user_interactions[user_id] = {"seen": set(), "dismissed": set()}
+        
+    user_interactions[user_id]["dismissed"].add(cluster_id)
+    return {"status": "dismissed"}
+
 @app.get("/traffic/incidents")
 async def get_incidents():
+    # Return simple list for map pins (all active)
     now = datetime.now()
-    filtered = [
-        i for i in active_incidents
-        if (now - datetime.fromisoformat(i["created_at"])).total_seconds() < 86400
-    ]
-    return {"incidents": filtered}
+    return {"incidents": [
+        c for c in active_clusters.values() 
+        if now < datetime.fromisoformat(c["expires_at"])
+    ]}
 
 @app.get("/traffic/stats")
 def get_traffic_metrics():
