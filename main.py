@@ -390,13 +390,6 @@ async def login(request: Request):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
 
 
-@app.post("/auth/verify")
-def verify_otp(phone: str, otp: str):
-    if otp == "1234":
-        token = create_access_token({"sub": "mock-user-id"})
-        return {"status": "success", "token": token}
-    raise HTTPException(status_code=400, detail="Invalid OTP")
-
 
 # ----------------------------
 # Profiles / Preferences
@@ -872,7 +865,7 @@ async def test_ml_model():
 
 
 # ----------------------------
-# Geocode Search (Lusaka-only)
+# Geocode Search (All Zambia - proximity biased)
 # ----------------------------
 KNOWN_STOPS = [
     {"name": "Eden University", "address": "Barlstone Park, Lusaka", "latitude": -15.3636, "longitude": 28.2334, "category": "Education"},
@@ -880,13 +873,25 @@ KNOWN_STOPS = [
     {"name": "Town Center", "address": "Cairo Road, Lusaka", "latitude": -15.4180, "longitude": 28.2820, "category": "City Center"},
     {"name": "Manda Hill Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3975, "longitude": 28.3070, "category": "Shopping"},
     {"name": "Arcades Shopping Mall", "address": "Great East Road, Lusaka", "latitude": -15.3956, "longitude": 28.3388, "category": "Shopping"},
+    {"name": "Livingstone Town", "address": "Victoria Falls, Southern Province", "latitude": -17.8419, "longitude": 25.8544, "category": "Town"},
+    {"name": "Ndola City Center", "address": "Copperbelt Province", "latitude": -12.9587, "longitude": 28.6366, "category": "City Center"},
+    {"name": "Kitwe City Center", "address": "Copperbelt Province", "latitude": -12.8024, "longitude": 28.2131, "category": "City Center"},
+    {"name": "Chipata Town", "address": "Eastern Province", "latitude": -13.6333, "longitude": 32.6500, "category": "Town"},
+    {"name": "Solwezi Town", "address": "North-Western Province", "latitude": -12.1833, "longitude": 26.4000, "category": "Town"},
 ]
 
-LUSAKA_BBOX = [28.10, -15.60, 29.10, -15.20]  # [west, south, east, north]
+# Zambia country bounds (for validation only, NOT filtering)
+ZAMBIA_BOUNDS = {
+    "west": 21.999,
+    "south": -18.079,
+    "east": 33.705,
+    "north": -8.224
+}
 
-def in_lusaka_bbox(lng_val: float, lat_val: float) -> bool:
-    w, s, e, n = LUSAKA_BBOX
-    return (w <= lng_val <= e) and (s <= lat_val <= n)
+def in_zambia(lng_val: float, lat_val: float) -> bool:
+    """Check if coordinates are within Zambia bounds"""
+    return (ZAMBIA_BOUNDS["west"] <= lng_val <= ZAMBIA_BOUNDS["east"]) and \
+           (ZAMBIA_BOUNDS["south"] <= lat_val <= ZAMBIA_BOUNDS["north"])
 
 def normalize_text(text: str) -> str:
     return (text or "").lower().strip()
@@ -899,92 +904,96 @@ async def geocode_search(
     lat: float | None = None,
     lng: float | None = None,
 ):
-    bbox_str = ",".join(str(x) for x in LUSAKA_BBOX)
-    default_proximity = (28.3228, -15.3875)  # (lng,lat)
+    """
+    Forward geocoding search for Zambia.
+    - Searches across ALL of Zambia (no bbox restriction)
+    - Biases results using user's proximity (lng, lat)
+    - Returns: [{ name, address, latitude, longitude, source }]
+    - Coordinates: Mapbox returns [lng, lat], we store { latitude, longitude }
+    """
+    # Default proximity to Lusaka center if user location not provided
+    default_proximity = (28.2833, -15.4167)  # (lng, lat) - Lusaka
     proximity = (lng, lat) if (lat is not None and lng is not None) else default_proximity
     proximity_str = f"{proximity[0]},{proximity[1]}"
 
     q_norm = normalize_text(query)
     results = []
 
-    # 1) local stops
+    # 1) Search local known stops first
     for stop in KNOWN_STOPS:
-        if q_norm in normalize_text(stop["name"]) or q_norm in normalize_text(stop["address"]):
-            if in_lusaka_bbox(stop["longitude"], stop["latitude"]):
-                results.append({
-                    "name": stop["name"],
-                    "address": stop["address"],
-                    "latitude": stop["latitude"],
-                    "longitude": stop["longitude"],
-                    "category": stop.get("category", "Unknown"),
-                    "source": "kuyenda_local",
-                })
-
-    # 2) mapbox geocode (v6 preferred, v5 fallback)
-    from urllib.parse import quote
-    encoded_query = quote(query.strip())
-    v6_url = "https://api.mapbox.com/search/geocode/v6/forward"
-
-    params_v6 = {
-        "q": query.strip(),
-        "access_token": MAPBOX_TOKEN,
-        "country": "ZM",
-        "bbox": bbox_str,
-        "proximity": proximity_str,
-        "types": "poi,address,place,street,neighborhood",
-        "limit": 15,
-        "language": "en",
-    }
-
-    resp = None
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(v6_url, params=params_v6)
-            if resp.status_code != 200:
-                v5_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded_query}.json"
-                params_v5 = {
-                    "access_token": MAPBOX_TOKEN,
-                    "country": "ZM",
-                    "bbox": bbox_str,
-                    "proximity": proximity_str,
-                    "types": "poi,address,place,locality,neighborhood",
-                    "limit": 15,
-                    "autocomplete": "true",
-                    "fuzzyMatch": "true",
-                    "language": "en",
-                }
-                resp = await client.get(v5_url, params=params_v5)
-    except Exception as e:
-        print(f"⚠️ Mapbox geocode error: {e}")
-        resp = None
-
-    if resp and resp.status_code == 200:
-        data = resp.json()
-        features = data.get("features", [])
-        for feat in features:
-            geometry = feat.get("geometry", {})
-            coordinates = geometry.get("coordinates", []) or feat.get("center", [])
-            if len(coordinates) != 2:
-                continue
-
-            feat_lng, feat_lat = float(coordinates[0]), float(coordinates[1])
-            if not in_lusaka_bbox(feat_lng, feat_lat):
-                continue
-
-            name = feat.get("text") or feat.get("place_name", "Unknown")
-            address = feat.get("place_name") or feat.get("properties", {}).get("full_address", name)
+        if q_norm in normalize_text(stop["name"]) or q_norm in normalize_text(stop.get("address", "")):
             results.append({
-                "name": name,
-                "address": address,
-                "latitude": feat_lat,
-                "longitude": feat_lng,
-                "source": "mapbox",
+                "id": f"local_{stop['name'].lower().replace(' ', '_')}",
+                "name": stop["name"],
+                "address": stop.get("address", "Zambia"),
+                "latitude": stop["latitude"],
+                "longitude": stop["longitude"],
+                "category": stop.get("category", "Unknown"),
+                "source": "kuyenda_local",
             })
 
-    # 3) dedupe
+    # 2) Mapbox Forward Geocoding (v5 API - more reliable)
+    from urllib.parse import quote
+    encoded_query = quote(query.strip())
+    mapbox_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded_query}.json"
+
+    params = {
+        "access_token": MAPBOX_TOKEN,
+        "country": "ZM",                                    # Restrict to Zambia
+        "types": "poi,address,place,locality,neighborhood", # POIs, addresses, towns, neighborhoods
+        "limit": 10,                                        # Max results
+        "proximity": proximity_str,                         # Bias towards user location
+        "autocomplete": "true",                             # Enable autocomplete
+        "language": "en",                                   # English results
+        # NO bbox - search all of Zambia
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(mapbox_url, params=params)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                features = data.get("features", [])
+                
+                for feat in features:
+                    # Mapbox returns coordinates as [longitude, latitude]
+                    center = feat.get("center", [])
+                    if len(center) != 2:
+                        continue
+                    
+                    feat_lng, feat_lat = float(center[0]), float(center[1])
+                    
+                    # Validate coordinates are within Zambia
+                    if not in_zambia(feat_lng, feat_lat):
+                        continue
+                    
+                    # Extract name and address
+                    name = feat.get("text") or feat.get("place_name", "Unknown")
+                    address = feat.get("place_name") or name
+                    place_type = feat.get("place_type", [])
+                    category = place_type[0] if place_type else "place"
+                    
+                    results.append({
+                        "id": feat.get("id", f"mapbox_{feat_lng}_{feat_lat}"),
+                        "name": name,
+                        "address": address,
+                        "latitude": feat_lat,   # Store as latitude
+                        "longitude": feat_lng,  # Store as longitude
+                        "category": category,
+                        "source": "mapbox",
+                    })
+            else:
+                print(f"⚠️ Mapbox geocode error: {resp.status_code} - {resp.text[:200]}")
+                
+    except Exception as e:
+        print(f"⚠️ Mapbox geocode exception: {e}")
+
+    # 3) Deduplicate results
     seen = set()
     deduped = []
     for r in results:
+        # Use rounded coords + normalized name for dedup key
         key = (
             normalize_text(r.get("name", "")),
             round(float(r["longitude"]), 4),
@@ -995,10 +1004,14 @@ async def geocode_search(
         seen.add(key)
         deduped.append(r)
 
-    # 4) final validation + sort
-    valid = [r for r in deduped if in_lusaka_bbox(r["longitude"], r["latitude"])]
-    valid.sort(key=lambda x: (0 if x.get("source") == "kuyenda_local" else 1, x.get("name", "").lower()))
-    return {"results": valid[:15]}
+    # 4) Sort: local stops first, then by name
+    deduped.sort(key=lambda x: (
+        0 if x.get("source") == "kuyenda_local" else 1,
+        x.get("name", "").lower()
+    ))
+    
+    # Return max 10 results
+    return {"results": deduped[:10]}
 
 @app.get("/geocode/reverse")
 @limiter.limit("30/minute")
