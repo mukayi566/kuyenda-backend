@@ -114,16 +114,29 @@ except Exception as e:
 # ----------------------------
 # Validation & Utilities
 # ----------------------------
-ZAMBIA_BOUNDS = {"min_lat": -18.5, "max_lat": -8.0, "min_lng": 21.5, "max_lng": 34.0}
+# Zambia country bounds (used for route validation and geocoding)
+ZAMBIA_BOUNDS = {
+    "west": 21.999,   # Western-most longitude
+    "south": -18.079, # Southern-most latitude (negative = South)
+    "east": 33.705,   # Eastern-most longitude
+    "north": -8.224   # Northern-most latitude (negative = South)
+}
 
 def validate_coords(lat: float, lng: float) -> bool:
-    """Validate coordinate ranges (and lightly validate Zambia bounds)."""
+    """
+    Validate coordinate ranges (basic validation for Zambia bounds).
+    Returns True even if outside Zambia - just logs a warning.
+    """
+    # Basic world coordinate validation
     if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
         return False
-    if not (ZAMBIA_BOUNDS["min_lat"] <= lat <= ZAMBIA_BOUNDS["max_lat"]):
+    
+    # Zambia bounds check (warning only, not blocking)
+    if not (ZAMBIA_BOUNDS["south"] <= lat <= ZAMBIA_BOUNDS["north"]):
         print(f"⚠️ Suspicious lat out of Zambia bounds: {lat}, {lng}")
-    if not (ZAMBIA_BOUNDS["min_lng"] <= lng <= ZAMBIA_BOUNDS["max_lng"]):
+    if not (ZAMBIA_BOUNDS["west"] <= lng <= ZAMBIA_BOUNDS["east"]):
         print(f"⚠️ Suspicious lng out of Zambia bounds: {lat}, {lng}")
+    
     return True
 
 def parse_lng_lat(coord_str: str):
@@ -972,14 +985,7 @@ KNOWN_STOPS = [
     {"name": "Solwezi Town", "address": "North-Western Province", "latitude": -12.1833, "longitude": 26.4000, "category": "Town"},
 ]
 
-# Zambia country bounds (for validation only, NOT filtering)
-ZAMBIA_BOUNDS = {
-    "west": 21.999,
-    "south": -18.079,
-    "east": 33.705,
-    "north": -8.224
-}
-
+# in_zambia uses the ZAMBIA_BOUNDS defined at the top of the file
 def in_zambia(lng_val: float, lat_val: float) -> bool:
     """Check if coordinates are within Zambia bounds"""
     return (ZAMBIA_BOUNDS["west"] <= lng_val <= ZAMBIA_BOUNDS["east"]) and \
