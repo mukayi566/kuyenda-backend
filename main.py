@@ -442,6 +442,21 @@ async def upload_avatar(
     file: UploadFile = File(None),
     user_id: str = Depends(get_current_user),
 ):
+    """
+    Upload avatar to Supabase Storage (permanent, survives cache clears).
+    
+    Flow:
+    1. Receive image file from mobile app
+    2. Upload to Supabase Storage bucket 'avatars'
+    3. Get public URL
+    4. Update profiles.avatar_url in database
+    5. Return public URL to app
+    
+    Why this fixes cache clearing issue:
+    - Before: App stored local file path (file://cache/...)
+    - After: App stores Supabase public URL (https://...)
+    - URLs are permanent and don't depend on device storage
+    """
     try:
         if not file:
             raise HTTPException(status_code=400, detail="No file provided")
@@ -449,23 +464,100 @@ async def upload_avatar(
         if not file.content_type or not file.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail="File must be an image")
 
-        ext = file.filename.split(".")[-1] if file.filename else "jpg"
-        filename = f"{user_id}_{uuid.uuid4().hex[:8]}.{ext}"
-
-        os.makedirs("static/avatars", exist_ok=True)
-        file_path = f"static/avatars/{filename}"
-
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        base_url = str(request.base_url).rstrip("/")
-        full_url = f"{base_url}/static/avatars/{filename}"
-        return {"url": full_url}
+        # Get file extension
+        ext = "jpg"
+        if file.filename:
+            parts = file.filename.rsplit(".", 1)
+            if len(parts) > 1:
+                ext = parts[1].lower()
+        
+        # Validate extension
+        allowed_extensions = ["jpg", "jpeg", "png", "gif", "webp"]
+        if ext not in allowed_extensions:
+            ext = "jpg"
+        
+        # Create unique filename: {userId}/avatar_{timestamp}.{ext}
+        timestamp = int(datetime.now().timestamp() * 1000)
+        storage_path = f"{user_id}/avatar_{timestamp}.{ext}"
+        
+        # Read file content
+        file_content = await file.read()
+        
+        # Get Supabase client
+        from supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        # Try to delete old avatar first (optional cleanup)
+        try:
+            # List existing files for this user
+            existing_files = supabase.storage.from_("avatars").list(path=user_id)
+            if existing_files:
+                for old_file in existing_files:
+                    old_path = f"{user_id}/{old_file['name']}"
+                    supabase.storage.from_("avatars").remove([old_path])
+        except Exception as cleanup_error:
+            print(f"⚠️ Avatar cleanup warning (non-fatal): {cleanup_error}")
+        
+        # Upload to Supabase Storage
+        # Using 'avatars' bucket - must be created in Supabase dashboard
+        content_type = file.content_type or f"image/{ext}"
+        
+        upload_response = supabase.storage.from_("avatars").upload(
+            path=storage_path,
+            file=file_content,
+            file_options={
+                "content-type": content_type,
+                "upsert": "true"  # Overwrite if exists
+            }
+        )
+        
+        # Get public URL
+        # For public buckets, use get_public_url
+        # For private buckets, use create_signed_url (requires expiry)
+        public_url = supabase.storage.from_("avatars").get_public_url(storage_path)
+        
+        # Update profiles table with new avatar URL
+        supabase.table("profiles").update({
+            "avatar_url": public_url
+        }).eq("id", user_id).execute()
+        
+        print(f"✅ Avatar uploaded successfully: {public_url}")
+        return {"url": public_url}
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        print(f"❌ Avatar upload failed: {e}")
+        
+        # Fallback: If Supabase Storage fails, use local filesystem
+        try:
+            ext = file.filename.split(".")[-1] if file.filename else "jpg"
+            filename = f"{user_id}_{uuid.uuid4().hex[:8]}.{ext}"
+            
+            os.makedirs("static/avatars", exist_ok=True)
+            file_path = f"static/avatars/{filename}"
+            
+            # Reset file position after read
+            await file.seek(0)
+            file_content = await file.read()
+            
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+            
+            base_url = str(request.base_url).rstrip("/")
+            full_url = f"{base_url}/static/avatars/{filename}"
+            
+            # Update profiles table
+            from supabase_client import get_supabase
+            supabase = get_supabase()
+            supabase.table("profiles").update({
+                "avatar_url": full_url
+            }).eq("id", user_id).execute()
+            
+            print(f"⚠️ Fallback to local storage: {full_url}")
+            return {"url": full_url}
+        except Exception as fallback_error:
+            raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 # ----------------------------
